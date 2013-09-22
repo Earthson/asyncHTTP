@@ -11,7 +11,7 @@ taskes are represented as tuple(task_type, arguments_to_proc_func)
 
 arguments_to_proc_func is a tuple, it is passed to func proc by `proc(*arguments_to_proc_fun)`
 
-'''python
+```python
 from asynchttp import reg_task
 
 
@@ -25,4 +25,4 @@ def do_proc(sender, url):
 #finally run function async_run
 #this function blocked until all task has been done(if you do not add new task when all task has been done)
 async_run(your_urls_here)
-'''
+```
