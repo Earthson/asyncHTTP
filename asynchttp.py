@@ -23,7 +23,12 @@ class TmpResponse(object):
 def client_gen(http_client):
     def sender_gen(cj):
         #cj.save(ignore_discard=True, ignore_expires=True)
-        cj.load(ignore_discard=True, ignore_expires=True)
+        try:
+            #try load file
+            cj.load(ignore_discard=True, ignore_expires=True)
+        except:
+            #File May not exist
+            pass
         #print(cj.as_lwp_str())
         def sender(url, callback):
             oreq = urllib.request.Request(url)
