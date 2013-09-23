@@ -5,7 +5,7 @@ conn_limit = 5000
 from tornado import httpclient
 from http.client import HTTPMessage, HTTPResponse
 
-import http.cookiejar
+from http.cookiejar import MozillaCookieJar, DefaultCookiePolicy
 import urllib.request
 
 from tornado.ioloop import IOLoop
@@ -29,7 +29,6 @@ def client_gen(http_client):
         except:
             #File May not exist
             pass
-        #print(cj.as_lwp_str())
         def sender(url, callback):
             oreq = urllib.request.Request(url)
             req = httpclient.HTTPRequest(url)
@@ -37,7 +36,7 @@ def client_gen(http_client):
             req.headers = {
                 "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/29.0.1547.57 Safari/537.36",
             }
-            req.headers.update(oreq.headers)
+            req.headers.update(oreq.header_items())
             def callback_gen(callback):
                 def func(response):
                     responseinfo = HTTPMessage()
@@ -95,7 +94,7 @@ import random
 def async_run(urls, machine_cnt=50, conn_cnt=300, extra_cookie=None):
     from threading import Thread
     fnames = ["cookies/%s.cookie" % i for i in range(machine_cnt)]
-    maccookies = [http.cookiejar.LWPCookieJar(e) for e in fnames]
+    maccookies = [MozillaCookieJar(e, policy=DefaultCookiePolicy(rfc2965=True)) for e in fnames]
     if extra_cookie is not None:
         for each in maccookies:
             each.set_cookie(extra_cookie)
