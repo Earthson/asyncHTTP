@@ -31,7 +31,7 @@ def client_gen(http_client):
             pass
         def sender(url, callback):
             oreq = urllib.request.Request(url)
-            req = httpclient.HTTPRequest(url)
+            req = httpclient.HTTPRequest(url, request_timeout=5.0)
             cj.add_cookie_header(oreq)
             req.headers = {
                 "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/29.0.1547.57 Safari/537.36",
@@ -79,7 +79,12 @@ def reg_task(task_name):
 def reg_response(task_name):
     def wrapper(func):
         def ifunc(sender, url):
-            return sender(url, callback=func)
+            def callback(response):
+                urls = func(response)
+                if urls is not None:
+                    for e in urls:
+                        task_q.put((e[0], (sender, e[1])))
+            return sender(url, callback=callback)
         return ifunc
     return wrapper
 
