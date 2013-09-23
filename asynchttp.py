@@ -79,12 +79,14 @@ def reg_task(task_name):
 def reg_response(task_name):
     def wrapper(func):
         def ifunc(sender, url):
+            count_q.put(True)
             def callback(response):
                 urls = func(response)
                 if urls is not None:
                     for e in urls:
                         task_q.put((e[0], (sender, e[1])))
             return sender(url, callback=callback)
+        task_map[task_name] = ifunc
         return ifunc
     return wrapper
 
@@ -123,3 +125,7 @@ def async_run(urls, machine_cnt=50, conn_cnt=300, extra_cookie=None):
 def get_solution():
     while not solution_q.empty():
         yield solution_q.get()
+
+
+def put_solution(it):
+    solution_q.put(it)
