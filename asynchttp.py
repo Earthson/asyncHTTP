@@ -98,7 +98,7 @@ def alloc_task():
 
 import random
 
-def async_run(urls, machine_cnt=50, conn_cnt=300, extra_cookie=None):
+def async_run(urls, conn_cnt=300, machine_cnt=50, extra_cookie=None):
     from threading import Thread
     fnames = ["cookies/%s.cookie" % i for i in range(machine_cnt)]
     maccookies = [MozillaCookieJar(e, policy=DefaultCookiePolicy(rfc2965=True)) for e in fnames]
