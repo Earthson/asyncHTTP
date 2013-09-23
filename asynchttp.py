@@ -77,6 +77,14 @@ def reg_task(task_name):
     return wrapper
 
 
+def reg_response(task_name):
+    def wrapper(func):
+        def ifunc(sender, url):
+            return sender(url, callback=func)
+        return ifunc
+    return wrapper
+
+
 def alloc_task():
     while True:
         x = task_q.get()

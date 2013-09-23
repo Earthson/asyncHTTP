@@ -15,11 +15,16 @@ arguments_to_proc_func is a tuple, it is passed to func proc by `proc(*arguments
 from asynchttp import reg_task, async_run
 
 
-@reg_task("here_your_task_type"):
+@reg_task("here_your_task_type")
 def do_proc(sender, url):
     def callback(response):
         print(response.body)
     sender(url, callback=callback)
+
+#Or just use reg_response for much more simple task
+@reg_response("you_task_type")
+def print_response_body(response):
+    print(response.body)
 
 
 #finally run function async_run
