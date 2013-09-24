@@ -26,7 +26,7 @@ def do_proc(sender, url):
 def print_response_body(response):
     print(response.body)
     #add new task which using the same sender(same cookiesjar)
-    return [("new_task_type", new_url)]
+    yield ("new_task_type", new_url)
 
 
 #finally run function async_run
