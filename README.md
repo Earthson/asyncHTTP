@@ -12,7 +12,7 @@ taskes are represented as tuple(task_type, arguments_to_proc_func)
 arguments_to_proc_func is a tuple, it is passed to func proc by `proc(*arguments_to_proc_fun)`
 
 ```python
-from asynchttp import reg_task, async_run, async_response
+from asynchttp import reg_task, async_run, reg_response
 
 
 @reg_task("here_your_task_type")
