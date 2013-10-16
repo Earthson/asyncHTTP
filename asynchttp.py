@@ -131,7 +131,7 @@ todo_at_exit = []
 
 
 def get_senders(mac_cnt=50, proxys=None):
-    fnames = ["cookies/%s.cookie" % i for i in range(machine_cnt)]
+    fnames = ["cookies/%s.cookie" % i for i in range(mac_cnt)]
     maccookies = [MozillaCookieJar(e, policy=DefaultCookiePolicy(rfc2965=True)) for e in fnames]
     if extra_cookie is not None:
         for each in maccookies:
