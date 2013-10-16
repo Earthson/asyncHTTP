@@ -21,7 +21,7 @@ class TmpResponse(object):
 
 
 def client_gen(http_client):
-    def sender_gen(cj):
+    def sender_gen(cj, proxy=None):
         #cj.save(ignore_discard=True, ignore_expires=True)
         try:
             #try load file
@@ -31,6 +31,8 @@ def client_gen(http_client):
             pass
         def sender(url, callback):
             oreq = urllib.request.Request(url)
+            proxy_host=None if proxy is None else proxy[0]
+            proxy_port=None if proxy is None else proxy[1]
             req = httpclient.HTTPRequest(url, request_timeout=5.0)
             cj.add_cookie_header(oreq)
             req.headers = {
