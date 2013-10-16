@@ -105,6 +105,7 @@ def task_alloc():
     """
     while True:
         x = task_q.get(timeout=10)
+        print(x)
         x[0](*x[1:])
         
 
