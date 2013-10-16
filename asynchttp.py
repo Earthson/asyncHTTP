@@ -20,7 +20,11 @@ class TmpResponse(object):
         return self._info
 
 
-def client_gen(http_client):
+def nothing():
+    pass
+
+
+def client_gen(http_client, task_start=nothing, task_end=nothing):
     def sender_gen(cj, proxy=None):
         #cj.save(ignore_discard=True, ignore_expires=True)
         try:
@@ -41,93 +45,82 @@ def client_gen(http_client):
             req.headers.update(oreq.header_items())
             def callback_gen(callback):
                 def func(response):
-                    responseinfo = HTTPMessage()
-                    for k, v in response.headers.items():
-                        responseinfo[k] = v
-                    tmpresponse = TmpResponse(responseinfo)
-                    cj.extract_cookies(tmpresponse, oreq)
-                    ans = callback(response)
-                    #cj.save(ignore_discard=True, ignore_expires=True)
-                    count_q.get()
-                    #print("CountQueueSize: ", count_q.qsize())
-                    if count_q.empty():
-                        print("#stop")
-                        io_loop.stop()
-                    return ans
+                    try:
+                        responseinfo = HTTPMessage()
+                        for k, v in response.headers.items():
+                            responseinfo[k] = v
+                        tmpresponse = TmpResponse(responseinfo)
+                        cj.extract_cookies(tmpresponse, oreq)
+                        callback(response)
+                        #cj.save(ignore_discard=True, ignore_expires=True)
+
+                        #tell taskmanager that the task have been done
+                    finally:
+                        task_end()
                 return func
+            #try to start task, taskmanager may block here for limiting connection:)
+            task_start()
             http_client.fetch(req, callback=callback_gen(callback))
         return sender
     return sender_gen
 
 
+
+import threading
+import time
+
+__conn_count = 0
+__conn_lock = threading.Lock()
+
+def tasker_start(limit=1000):
+    def func():
+        global __conn_count, __conn_lock
+        while __conn_count > limit:
+            time.sleep(1)
+        __conn_lock.acquire()
+        __conn_count += 1
+        __conn_lock.release()
+    return func
+
+
+def tasker_end():
+    def func():
+        __conn_lock.acquire()
+        __conn_count -= 1
+        __conn_lock.release()
+    return func
+
+
 from queue import Queue
 
 task_q = Queue()
-count_q = Queue(conn_limit)
-solution_q = Queue()
 
-task_map = dict()
-
-def reg_task(task_name):
-    def wrapper(func):
-        def ifunc(*args, **kwargs):
-            count_q.put(True)
-            return func(*args, **kwargs)
-        task_map[task_name] = ifunc
-        return ifunc
-    return wrapper
-
-
-def reg_response(task_name):
-    def wrapper(func):
-        def ifunc(sender, url):
-            count_q.put(True)
-            def callback(response):
-                urls = func(response)
-                if urls is not None:
-                    for e in urls:
-                        task_q.put((e[0], (sender, e[1])))
-            return sender(url, callback=callback)
-        task_map[task_name] = ifunc
-        return ifunc
-    return wrapper
-
-
-def alloc_task():
+def task_alloc():
     while True:
         x = task_q.get()
-        task_map[x[0]](*x[1])
+        x[0](*x[1:])
+        
 
-import random
 
-def async_run(urls, conn_cnt=300, machine_cnt=50, extra_cookie=None):
-    from threading import Thread
-    fnames = ["cookies/%s.cookie" % i for i in range(machine_cnt)]
-    maccookies = [MozillaCookieJar(e, policy=DefaultCookiePolicy(rfc2965=True)) for e in fnames]
-    if extra_cookie is not None:
-        for each in maccookies:
-            each.set_cookie(extra_cookie)
-
-    async_client = client_gen(httpclient.AsyncHTTPClient())
-    mysenders = [async_client(e) for e in maccookies]
-
-    task_th = Thread(target=alloc_task)
+def start_task_alloc():
+    task_th = threading.Thread(target=task_alloc)
     task_th.daemon = True
-    task_th.start()
-
-    print("generating task...")
-
-    for t, u in urls:
-        task_q.put((t, (random.choice(mysenders), u)))
-    io_loop.start()
-    for each in maccookies:
-        each.save()
+    task_th.start() 
 
 
-def get_solution():
-    while not solution_q.empty():
-        yield solution_q.get()
+def add_task(sender, url, callback):
+    task_q.put(sender, url, callback)
 
 
-def put_solution(it):
-    solution_q.put(it)
+def reg_task(sender, url):
+    def func(callback):
+        def ifunc(response):
+            ans = callback(response)
+            if ans is not None:
+                for e in ans:
+                    add_task(sender, *e)
+        add_task(sender, url, ifunc)
+        return ifunc
+    return func
+
+start_task_alloc()
