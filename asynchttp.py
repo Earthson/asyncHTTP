@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-conn_limit = 5000
-
 from tornado import httpclient
 from http.client import HTTPMessage, HTTPResponse
 
@@ -126,26 +124,33 @@ def reg_task(sender, url):
     return func
 
 
-def async_run(urls, conn_cnt=300, machine_cnt=50, extra_cookie=None, proxys=None):
+reg_url = lambda sender: lambda url: reg_task(sender, url)
+
+
+todo_at_exit = []
+
+
+def get_senders(mac_cnt=50, proxys=None):
     fnames = ["cookies/%s.cookie" % i for i in range(machine_cnt)]
     maccookies = [MozillaCookieJar(e, policy=DefaultCookiePolicy(rfc2965=True)) for e in fnames]
     if extra_cookie is not None:
         for each in maccookies:
             each.set_cookie(extra_cookie)
-
     async_client = client_gen(httpclient.AsyncHTTPClient(), task_start=tasker_start(), task_end=tasker_end())
     if proxys is not None:
         mysenders = [async_client(e, p) for e, p in zip(maccookies, proxys)]
     else:
         mysenders = [async_client(e) for e in maccookies]
+    def save_cookies():
+        for each in maccookies:
+            each.save()
+    todo_at_exit.append(save_cookies)
+    return mysenders
 
-    print("generating task...")
 
-    for u, c in urls:
-        add_task(random.choice(mysenders), u, c)
+def async_run():
     start_task_alloc()
     io_loop.start()
-    for each in maccookies:
-        each.save()
+    for each in todo_at_exit:
+        each()
 
-async_run(tuple())
