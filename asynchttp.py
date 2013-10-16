@@ -92,6 +92,7 @@ from queue import Queue
 task_q = Queue()
 
 def task_alloc():
+    """
     while True:
         try:
             x = task_q.get(timeout=10)
@@ -101,6 +102,10 @@ def task_alloc():
             print("no task in queue, exit now!")
             io_loop.stop()
             exit(0)
+    """
+    while True:
+        x = task_q.get(timeout=10)
+        x[0](*x[1:])
         
 
 def start_task_alloc():
