@@ -133,7 +133,7 @@ def async_run(urls, conn_cnt=300, machine_cnt=50, extra_cookie=None, proxys=None
         for each in maccookies:
             each.set_cookie(extra_cookie)
 
-    async_client = client_gen(httpclient.AsyncHTTPClient())
+    async_client = client_gen(httpclient.AsyncHTTPClient(), task_start=tasker_start(), task_end=tasker_end())
     if proxys is not None:
         mysenders = [async_client(e, p) for e, p in zip(maccookies, proxys)]
     else:
