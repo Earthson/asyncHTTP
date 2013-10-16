@@ -96,7 +96,8 @@ def task_alloc():
         try:
             x = task_q.get(timeout=10)
             x[0](*x[1:])
-        except:
+        except Exception as e:
+            print(e)
             print("no task in queue, exit now!")
             io_loop.stop()
             exit(0)
