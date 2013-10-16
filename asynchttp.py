@@ -33,7 +33,7 @@ def client_gen(http_client, task_start=nothing, task_end=nothing):
             pass
         def sender(req, callback):
             if isinstance(req, str):
-                req = httpclient.HTTPRequest(url, request_timeout=5, user_agent='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/29.0.1547.57 Safari/537.36')
+                req = httpclient.HTTPRequest(req, request_timeout=5, user_agent='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/29.0.1547.57 Safari/537.36')
             oreq = urllib.request.Request(req.url)
             proxy_host=None if proxy is None else proxy[0]
             proxy_port=None if proxy is None else proxy[1]
