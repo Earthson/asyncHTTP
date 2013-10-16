@@ -115,8 +115,8 @@ def async_run(urls, conn_cnt=300, machine_cnt=50, extra_cookie=None):
 
     print("generating task...")
 
-    for i in range(conn_cnt):
-        task_q.put(("Req", (random.choice(mysenders), random.choice(urls))))
+    for t, u in urls:
+        task_q.put((t, (random.choice(mysenders), u)))
     io_loop.start()
     for each in maccookies:
         each.save()
