@@ -130,7 +130,7 @@ reg_url = lambda sender: lambda url: reg_task(sender, url)
 todo_at_exit = []
 
 
-def get_senders(mac_cnt=50, proxys=None):
+def get_senders(mac_cnt=50, proxys=None, extra_cookie=None):
     fnames = ["cookies/%s.cookie" % i for i in range(mac_cnt)]
     maccookies = [MozillaCookieJar(e, policy=DefaultCookiePolicy(rfc2965=True)) for e in fnames]
     if extra_cookie is not None:
