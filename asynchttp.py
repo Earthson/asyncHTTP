@@ -33,15 +33,13 @@ def client_gen(http_client, task_start=nothing, task_end=nothing):
         except:
             #File May not exist
             pass
-        def sender(url, callback):
-            oreq = urllib.request.Request(url)
+        def sender(req, callback):
+            if isinstance(req, str):
+                req = httpclient.HTTPRequest(url, request_timeout=5, user_agent='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/29.0.1547.57 Safari/537.36')
+            oreq = urllib.request.Request(req.url)
             proxy_host=None if proxy is None else proxy[0]
             proxy_port=None if proxy is None else proxy[1]
-            req = httpclient.HTTPRequest(url, request_timeout=5.0)
             cj.add_cookie_header(oreq)
-            req.headers = {
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/29.0.1547.57 Safari/537.36",
-            }
             req.headers.update(oreq.header_items())
             def callback_gen(callback):
                 def func(response):
@@ -97,10 +95,14 @@ task_q = Queue()
 
 def task_alloc():
     while True:
-        x = task_q.get()
-        x[0](*x[1:])
+        try:
+            x = task_q.get(timeout=10)
+            x[0](*x[1:])
+        except:
+            print("no task in queue, exit now!")
+            io_loop.stop()
+            exit(0)
         
-
 
 def start_task_alloc():
     task_th = threading.Thread(target=task_alloc)
@@ -123,4 +125,27 @@ def reg_task(sender, url):
         return ifunc
     return func
 
-start_task_alloc()
+
+def async_run(urls, conn_cnt=300, machine_cnt=50, extra_cookie=None, proxys=None):
+    fnames = ["cookies/%s.cookie" % i for i in range(machine_cnt)]
+    maccookies = [MozillaCookieJar(e, policy=DefaultCookiePolicy(rfc2965=True)) for e in fnames]
+    if extra_cookie is not None:
+        for each in maccookies:
+            each.set_cookie(extra_cookie)
+
+    async_client = client_gen(httpclient.AsyncHTTPClient())
+    if proxys is not None:
+        mysenders = [async_client(e, p) for e, p in zip(maccookies, proxys)]
+    else:
+        mysenders = [async_client(e) for e in maccookies]
+
+    print("generating task...")
+
+    for u, c in urls:
+        add_task(random.choice(mysenders), u, c)
+    start_task_alloc()
+    io_loop.start()
+    for each in maccookies:
+        each.save()
+
+async_run(tuple())
