@@ -81,6 +81,7 @@ def tasker_start(limit=1000):
 
 def tasker_end():
     def func():
+        global __conn_count, __conn_lock
         __conn_lock.acquire()
         __conn_count -= 1
         __conn_lock.release()
