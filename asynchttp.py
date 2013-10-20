@@ -109,23 +109,32 @@ def start_task_alloc():
     task_th.start() 
 
 
-def add_task(sender, url, callback):
-    task_q.put((sender, url, callback))
+
+def add_task(self, sender, url, callback):
+    def ifunc(*args, **kwargs):
+        try:
+            ans = callback(*args, **kwargs)
+        except Exception as e:
+            print("Exception:", e)
+            task_q.put((sender, url, ifunc))
+        self.send(ans)
+    task_q.put((sender, url, ifunc))
 
 
-def reg_task(sender, url):
+
+def reg_task(self, sender, url):
     def func(callback):
         def ifunc(response):
             ans = callback(response)
             if ans is not None:
                 for e in ans:
-                    add_task(sender, *e)
-        add_task(sender, url, ifunc)
+                    add_task(self, sender, *e)
+        add_task(self, sender, url, ifunc)
         return ifunc
     return func
 
 
-reg_url = lambda sender: lambda url: reg_task(sender, url)
+reg_url = lambda self, sender: lambda url: reg_task(self, sender, url)
 
 
 todo_at_exit = []
