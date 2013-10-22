@@ -39,7 +39,7 @@ def client_gen(http_client, task_start=nothing, task_end=nothing):
             pass
         def sender(req, callback):
             if isinstance(req, str):
-                req = httpclient.HTTPRequest(req, request_timeout=5, max_redirects=10, use_gzip=True)
+                req = httpclient.HTTPRequest(req, request_timeout=20, max_redirects=20, use_gzip=True)
                 req.headers = {
                         "Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
                         "User-Agent":'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/29.0.1547.57 Safari/537.36',
@@ -49,6 +49,7 @@ def client_gen(http_client, task_start=nothing, task_end=nothing):
             proxy_port=None if proxy is None else proxy[1]
             cj.add_cookie_header(oreq)
             req.headers.update(oreq.header_items())
+            #print("headers:", req.headers)
             def callback_gen(callback):
                 def func(response):
                     try:
@@ -157,7 +158,7 @@ class ahttpManager(object):
                         go_through(AResult(*m()))
                     return icallback
                 tocall = icallback_gen(t[2])
-                print("add:", t[1].url, tocall)
+                #print("add:", t[1].url, tocall)
                 self.add_task(t[0], t[1], icallback_gen(t[2]))
             def go_through(it=None):
                 try:
@@ -172,8 +173,17 @@ class ahttpManager(object):
             return get_res
         return ifunc
 
-    def add_task(self, sender, url, callback):
-        self.task_q.put((sender, url, callback))
+    def add_task(self, sender, url, callback, dep=0, retry=3):
+        def callback_gen(func):
+            def ifunc(response):
+                try:
+                    return callback(response)
+                except httpclient.HTTPError as err:
+                    if dep < retry:
+                        self.add_task(sender, url, callback, dep+1)
+            return ifunc
+        print("add_task:", url if isinstance(url, str) else url.url)
+        self.task_q.put((sender, url, callback_gen(callback)))
 
     def reg_task(self, sender, url):
         def func(callback):
