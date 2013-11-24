@@ -1,14 +1,69 @@
 #!/usr/bin/env python
 
+import sys
+import email
 import types
-from tornado import httpclient
 from http.client import HTTPMessage, HTTPResponse
-
 from http.cookiejar import MozillaCookieJar, DefaultCookiePolicy
 import urllib.request
+from urllib.parse import urlparse
 
+from tornado import httpclient
+from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 io_loop = IOLoop.instance()
+
+
+from itertools import count
+
+pass_cnt = count()
+fail_cnt = count()
+from . import utils
+bg_timmer = utils.stimmer()
+
+
+#redirect black list. prevent random HTTP hijacking
+host_black_list = [
+        'bestpay.com.cn',
+        ]
+
+def use_curl():
+    AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
+
+
+def req_gen(url, referer='', **kwargs):
+    ug = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.66 Safari/537.36'
+    if url[:4] != 'http':
+        thost = urlparse(referer)
+        parent = '/'.join(thost.path.split('/')[:-1])
+        if url[:2] == '//':
+            url = thost.scheme+':'+url
+        elif url[0] == '/':
+            url = thost.scheme+"://"+thost.hostname+url
+        elif url[0] == '?':
+            url = thost.scheme+"://"+thost.hostname+thost.path+url
+        else:
+            url = thost.scheme+"://"+thost.hostname+parent+'/'+url
+    headers = {
+        #"Accept":"*/*",
+        #"Accept-Language":"en-US,en;q=0.8",
+        "Host":urlparse(url).hostname,
+        "Referer":referer,
+        "Cache-Control":"no-cache",
+        "Connection":"keep-alive",
+        #"User-Agent":'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/29.0.1547.57 Safari/537.36',
+        }
+    ans = {
+            "url":url,
+            "headers":headers,
+            "user_agent":ug,
+            "request_timeout":10,
+            "follow_redirects":False,
+            "max_redirects":25,
+            "use_gzip":True,
+        }
+    ans.update(**kwargs)
+    return ans
 
 
 class TmpResponse(object):
@@ -20,16 +75,14 @@ class TmpResponse(object):
         return self._info
 
 
-def req_gen(*args, **kwargs):
-    return httpclient.HTTPRequest(*args, **kwargs)
 
-
-def nothing():
+def nothing(*args, **kwargs):
     pass
 
+__conn_count = 0
 
-def client_gen(http_client, task_start=nothing, task_end=nothing):
-    def sender_gen(cj, proxy=None):
+def client_gen(http_client, limit):
+    def sender_gen(cj, timeout=8):
         #cj.save(ignore_discard=True, ignore_expires=True)
         try:
             #try load file
@@ -39,186 +92,167 @@ def client_gen(http_client, task_start=nothing, task_end=nothing):
             pass
         def sender(req, callback):
             if isinstance(req, str):
-                req = httpclient.HTTPRequest(req, request_timeout=20, max_redirects=20, use_gzip=True)
-                req.headers = {
-                        "Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                        "User-Agent":'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/29.0.1547.57 Safari/537.36',
-                        }
+                try:
+                    req = httpclient.HTTPRequest(**req_gen(req, ''))
+                except Exception as e:
+                    print('@url_generate_error:', e, file=sys.stderr)
+                    return
+            elif isinstance(req, dict):
+                req = httpclient.HTTPRequest(**req)
             oreq = urllib.request.Request(req.url)
-            proxy_host=None if proxy is None else proxy[0]
-            proxy_port=None if proxy is None else proxy[1]
             cj.add_cookie_header(oreq)
             req.headers.update(oreq.header_items())
-            #print("headers:", req.headers)
+            #print(req.headers)
             def callback_gen(callback):
                 def func(response):
                     try:
-                        responseinfo = HTTPMessage()
-                        for k, v in response.headers.items():
-                            responseinfo[k] = v
+                        #tell taskmanager that the task have been done
+                        global __conn_count
+                        __conn_count -= 1
+                        responseinfo = email.parser.Parser(HTTPMessage).parsestr('\n'.join(':'.join(e) for e in response.headers.get_all()))
                         tmpresponse = TmpResponse(responseinfo)
                         cj.extract_cookies(tmpresponse, oreq)
-                        callback(response)
-                        #cj.save(ignore_discard=True, ignore_expires=True)
-
-                        #tell taskmanager that the task have been done
+                        #print(cj)
+                        redirect_wrap(callback, redirect_callback=func, sender=sender)(response)
                     finally:
-                        task_end()
-                        print("finish:", response.request.url)
+                        print("@finish_request:", response.request.url, file=sys.stderr)
                 return func
             #try to start task, taskmanager may block here for limiting connection:)
-            task_start()
-            http_client.fetch(req, callback=callback_gen(callback))
+
+            def tofetch():
+                global __conn_count
+                if __conn_count < limit:
+                    __conn_count += 1
+                    http_client.fetch(req, callback=callback_gen(callback))
+                else:
+                    io_loop.add_timeout(io_loop.time()+0.1, tofetch)
+            io_loop.add_callback((lambda :io_loop.add_timeout(io_loop.time(), tofetch())))
         return sender
     return sender_gen
 
 
 
-import threading
-import time
-
-__conn_count = 0
-__conn_lock = threading.Lock()
-
-def tasker_start(limit=1000):
-    def func():
-        global __conn_count, __conn_lock
-        while __conn_count > limit:
-            time.sleep(1)
-        __conn_lock.acquire()
-        __conn_count += 1
-        __conn_lock.release()
-    return func
+from random import choice
+from functools import partial
+from . import utils
 
 
-def tasker_end():
-    def func():
-        global __conn_count, __conn_lock
-        __conn_lock.acquire()
-        __conn_count -= 1
-        __conn_lock.release()
-    return func
+#magic below, do not change anything. I don't think you can hold on.
+
+def redirect_wrap(func, redirect_callback, sender=None):
+    '''it's not enough infomation for redirect to be done.
+    so you have to pass an full callback function as redirect_callback().
+    it is a magic trick, this call make recursive to be lazy. without this call, you may have unlimited recursive error
+    '''
+    def ifunc(response, *args, **kwargs):
+        curl = response.request.url
+        relurl = response.effective_url
+        rhost = urlparse(relurl).hostname
+        for each in host_black_list:
+            if each in rhost:
+                print('@url_in_black_list:', relurl, file=sys.stderr)
+                response.code = 599
+                response.error = Exception('url_in_black_list')
+                break
+        if response.code in (301, 302):
+            req = req_gen(response.headers['Location'], relurl)
+            print('@redirect: %s => %s' % (relurl, req['url']), file=sys.stderr)
+            if sender is None:
+                choice(origin_senders)(req, redirect_callback)
+            else:
+                sender(req, redirect_callback)
+            return
+        return func(response, *args, **kwargs)
+    return ifunc
 
 
-class httpTask(tuple):
-    def __new__(self, *args):
-        return tuple.__new__(self, args)
+def init_wrap(func):
+    def ifunc(response, *args):
+        if response.code != 200:
+            print("@HTTPError: Code:", response.code, response.effective_url, file=sys.stderr)
+            print("@time_info: \n#fail: %s \n#time: %s" % (next(fail_cnt), bg_timmer()))
+            response.rethrow()
+            return
+        print("@time_info: \n#pass: %s \n#time: %s" % (next(fail_cnt), bg_timmer()))
+        charset = utils.charset_from_response(response)
+        response.ubody = utils.try_decode(response.body, charset)
+        return func(response, *args)
+    return ifunc
+
+from traceback import format_exc
+
+def ahttp_gen(mgr, senders):
+    call_mapper = dict()
+    @mgr.reg_proc('asynchttp')
+    def aproc(tasktype, args, kwargs, key, **extra_info):
+        sender = choice(senders)
+        if kwargs['calltype'] not in call_mapper:
+            print('@Unknown_Task:', tasktype, args, kwargs, file=sys.stderr)
+            mgr.fail(key)
+            return
+        tocall = call_mapper[kwargs['calltype']]
+        def ack_call(*args, **kwargs):
+            #try ignore all arguments
+            mgr.ack(key)
+            print("@finish", file=sys.stderr)
+        def fail_call(*args, **kwargs):
+            #try ignore all arguments
+            print("@error_trace_back", format_exc(), file=sys.stderr)
+            mgr.fail(key)
+        icall = tocall(sender, callback=ack_call, err_callback=fail_call)
+        for req in args:
+            sender(req, icall)
+
+    def call_reg(calltype):
+        def regger(func):
+            def ifunc(sender, callback, err_callback):
+                return recgen.rec_gen(init_wrap(func), callback=callback, err_callback=err_callback)
+            call_mapper[calltype] = ifunc
+            return func
+        return regger
+
+    from . import recgen
+    def call_reg_with_sender(calltype):
+        def regger(func):
+            def ifunc(sender, callback, err_callback):
+                return recgen.rec_gen(init_wrap(partial(func, sender=sender)), callback=callback, err_callback=err_callback)
+            call_mapper[calltype] = ifunc
+            return func
+        return regger
+
+    return call_reg, call_reg_with_sender
 
 
-class AResult(tuple):
-    def __new__(self, *res):
-        return tuple.__new__(self, res)
+def task_adder(mgr):
+    def task_add(calltype, req, key=None):
+        mgr.add(tasktype='asynchttp', args=(req,), kwargs={'calltype':calltype}, key=key)
+    return task_add
 
 
-from queue import Queue
-
-class ahttpManager(object):
-
-    def __init__(self, on_exit=[]):
-        self.task_q = Queue()
-        self.todo_at_exit = on_exit
-
-
-    def on_exit_append(self, *args):
-        self.todo_at_exit.extend(args)
-
-    def task_alloc(self):
-        while True:
-            try:
-                x = self.task_q.get(timeout=100)
-                x[0](*x[1:])
-            except Exception as e:
-                print(e)
-                print("no task in queue, exit now!")
-                io_loop.stop()
-                exit(0)
+class HTTPReg(object):
+    def __init__(self, mgr, senders):
+        self.mgr = mgr
+        self.senders = senders
+        self.reg, self.reg_with_sender = ahttp_gen(mgr, senders)
+        self.add = task_adder(mgr)
 
 
-    def start_task_alloc(self):
-        task_th = threading.Thread(target=self.task_alloc)
-        task_th.daemon = True
-        task_th.start() 
-
-
-    def gen(self, callback):
-        def ifunc(response):
-            g = callback(response)
-            res = []
-            def get_res():
-                #print("pass result:", res)
-                return res
-            if not isinstance(g, types.GeneratorType):
-                res.append(g)
-                return get_res
-            def new_task(t):
-                def icallback_gen(func):
-                    tmp = self.gen(func)
-                    def icallback(response):
-                        m = tmp(response)
-                        go_through(AResult(*m()))
-                    return icallback
-                tocall = icallback_gen(t[2])
-                #print("add:", t[1].url, tocall)
-                self.add_task(t[0], t[1], icallback_gen(t[2]))
-            def go_through(it=None):
-                try:
-                    e = g.send(it)
-                    if type(e) == httpTask:
-                        new_task(e)
-                    else:
-                        res.append(e)
-                except StopIteration as ex:
-                    pass
-            go_through()
-            return get_res
-        return ifunc
-
-    def add_task(self, sender, url, callback, dep=0, retry=3):
-        def callback_gen(func):
-            def ifunc(response):
-                try:
-                    return callback(response)
-                except httpclient.HTTPError as err:
-                    if dep < retry:
-                        self.add_task(sender, url, callback, dep+1)
-            return ifunc
-        print("add_task:", url if isinstance(url, str) else url.url)
-        self.task_q.put((sender, url, callback_gen(callback)))
-
-    def reg_task(self, sender, url):
-        def func(callback):
-            def ifunc(response):
-                ans = callback(response)
-                if ans is not None:
-                    for e in ans:
-                        self.add_task(sender, *e)
-            self.add_task(sender, url, ifunc)
-            return ifunc
-        return func
-
-    def async_run(self):
-        self.start_task_alloc()
-        io_loop.start()
-        for each in self.todo_at_exit:
-            each()
-
-ahttp_mgr = ahttpManager()
-
-def get_senders(mac_cnt=50, proxys=None, extra_cookie=None):
-    fnames = ["cookies/%s.cookie" % i for i in range(mac_cnt)]
-    maccookies = [MozillaCookieJar(e, policy=DefaultCookiePolicy(rfc2965=True)) for e in fnames]
+def get_senders(mac_cnt=1, extra_cookie=None, **kwargs):
+    #fnames = ["cookies/%s.cookie" % i for i in range(mac_cnt)]
+    #maccookies = [MozillaCookieJar(e, policy=DefaultCookiePolicy(rfc2965=True)) for e in fnames]
+    #maccookies = [MozillaCookieJar(e) for e in fnames]
+    maccookies = [MozillaCookieJar() for i in range(mac_cnt)]
     if extra_cookie is not None:
         for each in maccookies:
             each.set_cookie(extra_cookie)
-    async_client = client_gen(httpclient.AsyncHTTPClient(), task_start=tasker_start(), task_end=tasker_end())
-    if proxys is not None:
-        mysenders = [async_client(e, p) for e, p in zip(maccookies, proxys)]
-    else:
-        mysenders = [async_client(e) for e in maccookies]
-    def save_cookies():
-        for each in maccookies:
-            each.save()
-    ahttp_mgr.on_exit_append(save_cookies)
-    return mysenders
+    async_client = client_gen(httpclient.AsyncHTTPClient(), 40)
+    return [async_client(e, **kwargs) for e in maccookies]
 
 
+origin_senders = get_senders(1)
+
+
+if __name__ == "__main__":
+    sender = get_senders()[0]
+    sender('http://www.google.com', lambda x:print(x))
+    io_loop.start()
